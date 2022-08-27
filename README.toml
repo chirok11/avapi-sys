@@ -1,1 +1,4 @@
 Library to interact and fetch frames from ZOSI NVR (built on top of AVAPI)
+
+Arch + AMD + 6700XT frames to video convertation.
+`ffmpeg -vaapi_device /dev/dri/renderD128 -hwaccel vaapi -hwaccel_output_format vaapi -noautorotate -framerate 10 -i video.mp4 -vcodec h264_vaapi -vf format='nv12|vaapi,hwupload' -vsync 2 -bf 0 output.mp4`
