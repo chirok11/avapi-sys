@@ -7,7 +7,7 @@ fn main() {
     let uid = args[1].clone();
     let channel_id = args[2].parse::<i32>().unwrap();
 
-    let iotc = IOTC::new(32);
+    let iotc = IOTC::new(4096);
     assert!(iotc.is_ok());
     let mut iotc = iotc.unwrap();
     iotc.connect_to(uid);

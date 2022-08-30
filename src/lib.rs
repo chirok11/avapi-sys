@@ -1,9 +1,9 @@
 use crate::bindings::{
     avClientStart2, avGetAVApiVer, avInitialize, avRecvFrameData2, avSendIOCtrl,
-    AVIOCtrlType_IOTYPE_INNER_SND_DATA_DELAY, FRAMEINFO_t, IOTC_Connect_ByUID, IOTC_Get_SessionID,
-    IOTC_Get_Version, IOTC_Initialize, IOTC_Session_Check, SMsgAVIoctrlAVStream,
-    AV_ER_DATA_NOREADY, AV_ER_INCOMPLETE_FRAME, AV_ER_LOSED_THIS_FRAME,
-    AV_ER_REMOTE_TIMEOUT_DISCONNECT, AV_ER_SESSION_CLOSE_BY_REMOTE,
+    AVIOCtrlType_IOTYPE_INNER_SND_DATA_DELAY, FRAMEINFO_t, IOTC_Connect_ByUID,
+    IOTC_Connect_ByUID_Parallel, IOTC_Get_SessionID, IOTC_Get_Version, IOTC_Initialize,
+    IOTC_Session_Check, SMsgAVIoctrlAVStream, AV_ER_DATA_NOREADY, AV_ER_INCOMPLETE_FRAME,
+    AV_ER_LOSED_THIS_FRAME, AV_ER_REMOTE_TIMEOUT_DISCONNECT, AV_ER_SESSION_CLOSE_BY_REMOTE,
     ENUM_AVIOCTRL_MSGTYPE_IOTYPE_USER_IPCAM_START, IOTC_ER_INVALID_SID,
 };
 use anyhow::bail;
@@ -11,7 +11,7 @@ use bindings::{avClientStop, avDeInitialize, st_SInfo, IOTC_DeInitialize, IOTC_S
 use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::mem::{size_of_val, zeroed, MaybeUninit};
+use std::mem::{zeroed, MaybeUninit};
 use std::os::raw::{c_char, c_int, c_uchar};
 use std::time::Duration;
 
@@ -64,7 +64,7 @@ impl IOTC {
             self.sid = IOTC_Get_SessionID();
             println!("IOTC_Get_SessionID: {}", self.sid);
 
-            self.sid = IOTC_Connect_ByUID(str_to_c_str(&uid));
+            IOTC_Connect_ByUID_Parallel(str_to_c_str(&uid), self.sid);
             println!("IOTC_Connect_ByUID: {}", self.sid);
         }
     }
@@ -135,22 +135,22 @@ impl IOTC {
             .open("video.mp4")
             .unwrap();
 
-        let mut actual_frame_size = 0;
-        let mut expected_frame_size = 0;
-        let mut actual_frame_info_size = 0;
-        let mut frame_idx = 0;
-        let mut buf = vec![0u8; 128000]; // 128000 = 1024 * 1024
-        let mut frame_info: MaybeUninit<FRAMEINFO_t> =
-            unsafe { MaybeUninit::uninit().assume_init() };
-
         let mut fps = 0;
 
         unsafe {
             loop {
+                let mut actual_frame_size = 0;
+                let mut expected_frame_size = 0;
+                let mut actual_frame_info_size = 0;
+                let mut frame_idx = 0;
+                let mut buf = vec![0u8; 2304000]; // 128000 = 1024 * 1024
+                let mut frame_info: MaybeUninit<FRAMEINFO_t> =
+                    unsafe { MaybeUninit::uninit().assume_init() };
+
                 let ret = avRecvFrameData2(
                     self.av_index,
                     buf.as_mut_ptr() as *mut i8,
-                    128000,
+                    2304000,
                     &mut actual_frame_size,
                     &mut expected_frame_size,
                     frame_info.as_mut_ptr() as *mut i8,
@@ -158,6 +158,8 @@ impl IOTC {
                     &mut actual_frame_info_size,
                     &mut frame_idx,
                 );
+
+                println!("ret: {}", ret);
 
                 match ret {
                     AV_ER_DATA_NOREADY => {
@@ -184,17 +186,22 @@ impl IOTC {
                         println!("IOTC_ER_INVALID_SID");
                         break;
                     }
+                    ret => {
+                        if ret > 0 {
+                            println!("ret: {}", ret);
+                            println!("actual_frame_size: {}", actual_frame_size);
+                            println!("expected_frame_size: {}", expected_frame_size);
+                            println!("actual_frame_info_size: {}", actual_frame_info_size);
+                            println!("frame_idx: {}", frame_idx);
+
+                            let n = fs.write(&buf[..ret as usize]).unwrap();
+                            fps += 1;
+                            assert_eq!(n, ret as usize);
+                            fs.flush().expect("failed to flush file");
+                        }
+                    }
                     _ => {
                         println!("ret: {}", ret);
-                        println!("actual_frame_size: {}", actual_frame_size);
-                        println!("expected_frame_size: {}", expected_frame_size);
-                        println!("actual_frame_info_size: {}", actual_frame_info_size);
-                        println!("frame_idx: {}", frame_idx);
-
-                        let n = fs.write(&buf[..ret as usize]).unwrap();
-                        fps += 1;
-                        assert_eq!(n, ret as usize);
-                        fs.flush().expect("failed to flush file");
                     }
                 }
             }
